@@ -24,11 +24,13 @@ import os
 import utime
 import json
 import uasyncio as asyncio
-import network
-import urequests
 import neopixel
 import binascii
 import ntptime
+
+# TODO add mqtt_as as the network connector. NO NETWORK IN THIS VERSION OF THE CODE - ⚠️⚠️⚠️
+from mqtt_as import MQTTClient,config
+
 
 print("\n\n\n\n\n\n\n\n\n\n")
 print('  ____ ____  _____')
@@ -113,19 +115,13 @@ if not fileExists("/config/wifi_settings.json"):
     wifi_config = False
     print("wifi_settings.json not found!, did you run SETUP.py?\nContinuing without wifi...")
 
-
 # Define the wifi device
-wlan = network.WLAN(network.STA_IF)
 
 # Load wifi settings and connect to wifi if they are set up.
 if wifi_config:
     with open('/config/wifi_settings.json') as wifi_file:
         wifi_config = json.load(wifi_file)
         wifi_file.close()
-
-        wlan.active(True)
-        wlan.connect(wifi_config["NETWORK_NAME"],
-                     wifi_config["NETWORK_PASSWORD"])
 
 # Setup for data logging
 
@@ -155,7 +151,7 @@ except:
     seesaw = False
 
 
-# TODO: add support for the  aht10, as of now rx and tx might be swapped so im putting this on hold 
+# TODO: add support for the  aht10, as of now reciever and sender pins might be swapped so im putting this on hold 
 
 # try:
 #     aht10 = ahtx0.AHT10(i2c1)
@@ -264,13 +260,7 @@ fanSpinCounter = 0
 fanCounterPrevMs = utime.ticks_ms()
 fanCounterCurrentMs = utime.ticks_ms()
 
-# Display network and hardware info on boot
-net = wlan.ifconfig()
-
 print("Hardware ID:    " + board_id)
-print("IP Address:     " + net[0] + "\n")
-
-print("------DATE ----TIME  RED-GRN-BLU-WHT  LED-V---mA-----W  FAN--RPM  -TEMP-MOIS")
 
 # ----------------------Set up Functions -----------------------
 
@@ -289,19 +279,6 @@ def hourAndMinutestoSeconds(input_time):
 def steadyLED(color): np[0] = tuple([int(rgb * 255)
                                      for rgb in npc[color]]); np.write()  # Status LED on
 
-
-def pulseLED(color):  # Pulse the status LED
-    try:
-        for val in range(255):
-            np[0] = tuple([int(rgb * val) for rgb in npc[color]])
-            np.write()
-            utime.sleep(0.004)
-        for val in range(255, -1, -1):
-            np[0] = tuple([int(rgb * val) for rgb in npc[color]])
-            np.write()
-            utime.sleep_ms(4)
-    except Exception as e:
-        print("An exception has occurred with the status LED: ", e)
 
 
 def fanPulse(pin):     # Count fan rotation, triggered twice per rotation
@@ -389,10 +366,10 @@ def getStatsNoRTC():
         "\"?\"",
         "\"?\"",
         # Duty of red green blue, and white LEDs (respectivly R G B, and W)
-        round(r.duty_u16()/256),
-        round(g.duty_u16()/256),
-        round(b.duty_u16()/256),
-        round(w.duty_u16()/256),
+        r.duty_u16()//256,
+        g.duty_u16()//256,
+        b.duty_u16()//256,
+        w.duty_u16()//256,
         # voltage, miliamps, and wattage
         round(vol, 2),
         round(mam),
@@ -463,6 +440,7 @@ async def syncTime():
 async def ledStatus():
     global ledBuffer
     global np
+    global wifi_config
 
     while True:
         await asyncio.sleep_ms(1)
@@ -484,6 +462,9 @@ async def ledStatus():
             np[0] = ledColor
             np.write()
             await asyncio.sleep_ms(4)
+        if not wifi_config:
+            queueLedAction(2)
+
 
 
 # Log data to a file, {Year-month-day}.csv
