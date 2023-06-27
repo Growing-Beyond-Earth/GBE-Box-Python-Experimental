@@ -26,11 +26,11 @@ import json
 import uasyncio as asyncio
 import neopixel
 import binascii
+#TODO use another library instead of ntptime that is non blocking and asynchronous
 import ntptime
 
 # TODO add mqtt_as as the network connector. NO NETWORK IN THIS VERSION OF THE CODE - ⚠️⚠️⚠️
 from mqtt_as import MQTTClient,config
-
 
 print("\n\n\n\n\n\n\n\n\n\n")
 print('  ____ ____  _____')
@@ -98,9 +98,21 @@ np = neopixel.NeoPixel(machine.Pin(6), 1)
 npc = {"red": [0, 1, 0], "green": [1, 0, 0], "blue": [0, 0, 1], "yellow": [
     0.6, 1, 0], "cyan": [0.8, 0, 0.8], "magenta": [0, 0.8, 0.8], "white": [0.6, 0.6, 0.6]}
 
-# Magenta pulse at startup
+# blue and yellow pulse at startup to indicate python software (grb color scheme used for np[0])
+for val in range(0, 255):
+    np[0] = [0, 0, val]
+    np.write()
+    utime.sleep_ms(2)
 for val in range(255, -1, -1):
-    np[0] = [0, val, val]
+    np[0] = [0, 0, val]
+    np.write()
+    utime.sleep_ms(2)
+for val in range(0, 255):
+    np[0] = [val, val, 0]
+    np.write()
+    utime.sleep_ms(2)
+for val in range(255, -1, -1):
+    np[0] = [val, val, 0]
     np.write()
     utime.sleep_ms(2)
 
