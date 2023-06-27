@@ -11,11 +11,13 @@
 
 # This program (main.py) runs automatically each time the device is
 # powered up.
+
 # Import Required libraries
 import gbeformat
 from ds3231 import DS3231
 import seesaw
 import stemma_soil_sensor
+import ahtx0
 import ina219
 import machine
 import os
@@ -56,23 +58,26 @@ def fileExists(filename):
 
 # Load extra libraries from /lib/, if not able to load, do not run the dependent async function and print a warning
 
-libNotFoundMessage = "please make sure all the required libraries are in /lib/ in the pico. You can get a fresh copy of the entire program at GITHUB LINK"
+libNotFoundMessage = " not found in /lib/, please make sure all the required libraries are in /lib/ in the pico. You can get a fresh copy of the entire program at GITHUB LINK"
+
 if not fileExists("/lib/ina219.py"):
-    raise Exception(f"ina219.py not found in /lib/, {libNotFoundMessage}")
+    raise Exception(f"ina219.py{libNotFoundMessage}")
+
+if not fileExists("/lib/ahtx0.py"):
+    raise Exception(f"ahtx0.py{libNotFoundMessage}")
 
 if not fileExists("/lib/stemma_soil_sensor.py"):
     raise Exception(
-        f"stemma_soil_sensor.py not found in /lib/, {libNotFoundMessage}")
+        f"stemma_soil_sensor.py{libNotFoundMessage}")
 
 if not fileExists("/lib/seesaw.py"):
-    raise Exception(f"seesaw.py not found in /lib/, {libNotFoundMessage}")
+    raise Exception(f"seesaw.py{libNotFoundMessage}")
 
 if not fileExists("/lib/ds3231.py"):
-    raise Exception(f"ds3231 not found in /lib/, {libNotFoundMessage}")
+    raise Exception(f"ds3231{libNotFoundMessage}")
 
 if not fileExists("/lib/gbeformat.py"):
-    raise Exception(f"gbeformat not found in /lib/, {libNotFoundMessage}")
-
+    raise Exception(f"gbeformat{libNotFoundMessage}")
 
 # Load Load lights, fan, time zone configuration from JSON file
 
@@ -142,13 +147,27 @@ except:
 i2c1 = machine.I2C(1, sda=machine.Pin(18), scl=machine.Pin(19), freq=400000)
 
 # ----Set up I2C bus 1 for devices outside the control box-------
-
+# this will try and setup for all supported sensors.
 try:
     seesaw = stemma_soil_sensor.StemmaSoilSensor(i2c1)
     print("Connected to soil moisture sensor")
 except:
     seesaw = False
 
+
+# TODO: add support for the  aht10, as of now rx and tx might be swapped so im putting this on hold 
+
+# try:
+#     aht10 = ahtx0.AHT10(i2c1)
+#     aht10.initialize()
+#     print("test init worked!")
+#     while True:
+#         utime.sleep(10)
+# except Exception as e:
+#     print("test init failed")
+#     while True:
+#         utime.sleep(10)
+#     aht10 = False
 
 # ---Set internal clock using network time or I2C realtime clock---
 # the variable "rtc", refers to the Micropython RTC library, NOT the external battery powered RTC.
@@ -301,9 +320,10 @@ def tryGetINA():      # Read current sensor
     except:
         return -1, -1, -1
 
+
 def tryGetSeesaw():   # Read soil moisture & temp sensor
     global seesaw
-    
+
     # check to see if the seesaw is connected or not, if its not return -1.
     if not seesaw:
         return -1, -1
@@ -312,6 +332,11 @@ def tryGetSeesaw():   # Read soil moisture & temp sensor
         return seesaw.get_moisture(), seesaw.get_temp()  # type: ignore
     except:
         return (-1, -1)
+
+
+# read Co2 Temp and Humidity from the SCD sensor
+def tryGetSCD():
+    pass
 
 # gets the stats used for logging
 
@@ -402,11 +427,13 @@ def lookForUnknownNumber():
             continue
         return unknownNumber
 
+
 ledBuffer = []
+
+
 def queueLedAction(ledNumber):
     ledBuffer.append(ledNumber)
 
-    
 
 # setup promises that will run in the async event loop
 # syncs the time using the internet or rtc, runs every hour
@@ -431,6 +458,8 @@ async def syncTime():
 # 1 is a red pulse
 # 2 is a blue pulse
 # add more led actions TODO
+
+
 async def ledStatus():
     global ledBuffer
     global np
@@ -443,20 +472,18 @@ async def ledStatus():
         else:
             ledNumber = ledBuffer.pop()
 
-        for i in range(0,255):
-            ledColor = [0,0,0]
+        for i in range(0, 255):
+            ledColor = [0, 0, 0]
             ledColor[ledNumber] = i
             np[0] = ledColor
             np.write()
             await asyncio.sleep_ms(4)
-        for i in range(255,-1,-1):
-            ledColor = [0,0,0]
+        for i in range(255, -1, -1):
+            ledColor = [0, 0, 0]
             ledColor[ledNumber] = i
             np[0] = ledColor
             np.write()
             await asyncio.sleep_ms(4)
-
-        
 
 
 # Log data to a file, {Year-month-day}.csv
@@ -511,7 +538,7 @@ async def hardwareListener():
                 queueLedAction(0)
             except:
                 pass
-        
+
         # attempt to connect to the INA if its not already connected
         if not ina:
             try:
@@ -524,20 +551,18 @@ async def hardwareListener():
                 pass
 
         # check to see if readings are working, if not, set the hardware variable to false
-        
-        if (tryGetSeesaw() == (-1,-1)) and seesawDebounce:
+
+        if (tryGetSeesaw() == (-1, -1)) and seesawDebounce:
             print("i2c soil sensor disconnected")
             seesawDebounce = False
             seesaw = False
             queueLedAction(1)
-        
-        if (tryGetINA() == (-1,-1,-1)) and inaDebounce:
+
+        if (tryGetINA() == (-1, -1, -1)) and inaDebounce:
             print("INA disconnected")
             inaDebounce = False
             ina = False
             queueLedAction(1)
-        
-
 
 
 # Changes the lights and fans based off the time and user configurations
@@ -577,7 +602,7 @@ async def controlLightsAndFan():
 
 # Main Async Function, all it does is run the coroutines
 async def main():
-    await asyncio.gather(syncTime(), controlLightsAndFan(), logData(), hardwareListener(),ledStatus())
+    await asyncio.gather(syncTime(), controlLightsAndFan(), logData(), hardwareListener(), ledStatus())
 
 
 # Setup the main async event loop
