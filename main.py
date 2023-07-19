@@ -12,14 +12,18 @@
 # This program (main.py) runs automatically each time the device is
 # powered up.
 
+# ensure that there are no variables from previous runs
+# makes running from a file much safer and less prone to weird issues
+globals().clear()
+
 # Import Required libraries
+import machine
 import gbeformat
 from ds3231 import DS3231
 import seesaw
 import stemma_soil_sensor
 import ahtx0
 import ina219
-import machine
 import os
 import utime
 import json
@@ -79,7 +83,7 @@ if not fileExists("/lib/ds3231.py"):
     raise Exception(f"ds3231{libNotFoundMessage}")
 
 if not fileExists("/lib/gbeformat.py"):
-    raise Exception(f"gbeformat{libNotFoundMessage}")
+    raise Exception(f"gbeformat.py{libNotFoundMessage}")
 
 # Load Load lights, fan, time zone configuration from JSON file
 
@@ -128,18 +132,40 @@ if not fileExists("/config/wifi_settings.json"):
     print("wifi_settings.json not found!, did you run SETUP.py?\nContinuing without wifi...")
 
 # Define the wifi device
+# Get the Unique ID of the Pico. This line makes a conversion from an ascii string to a python string hex number
+board_id = binascii.hexlify(machine.unique_id()).decode()
 
 # Load wifi settings and connect to wifi if they are set up.
 if wifi_config:
     with open('/config/wifi_settings.json') as wifi_file:
         wifi_config = json.load(wifi_file)
         wifi_file.close()
+    config['ssid'] = wifi_config['NETWORK_NAME']
+    config['wifi_pw'] = wifi_config['NETWORK_PASSWORD']
+    config["queue_len"] = 1
+    config['client_id'] = board_id
+    #TODO make a central server that this will connect to, for now, connect to a raspberry pi on the local network
+    config['server'] = "broker.hivemq.com"#'192.168.0.100'
+    config['user'] = ""
+    config['password'] = ""
+    config['keepalive'] = 60
+    config['ping_interval'] = 0
+    config['ssl'] = False
+    config['ssl_params'] = {}
+    config['response_time'] = 10
+    config['clean_init'] = True
+    config['clean'] = True
+    config['max_repubs'] = 4
+    config['will'] = None
+    config['port'] = 1883
+
+
+
 
 # Setup for data logging
 
 
-# Get the Unique ID of the Pico. This line makes a conversion from an ascii string to a python string hex number
-board_id = binascii.hexlify(machine.unique_id()).decode()
+
 
 # -------Set up I2C bus 0 for devices inside the control box----
 
@@ -509,6 +535,41 @@ async def logData():
         logFile.close()
         await asyncio.sleep(3600)
 
+# This handles outages, and attempts to reconnect if one is detected
+# NOTE: this is not started in the main function, rather, its started in mqttHandler()
+async def reconnect(client):
+    while True:
+        await asyncio.sleep(1)
+        
+        if client.isconnected():
+            continue
+        
+        print("connection interrupted, attempting to recconect...")
+        await asyncio.sleep(3)
+        try:
+            await client.connect()
+            print("Conneted!")
+        except Exception as e:
+            print(f"failed to reconnect:{e}")
+            await asyncio.sleep(5)
+
+# Connect to the internet
+async def mqttHandler(client):
+    print("attempting to connect...")
+    while not client.isconnected():
+        try:
+            await client.connect()
+            print("Conneted!")
+        except Exception as e:
+            print(f"connection failed:{e}")
+            await asyncio.sleep(5)
+    
+    asyncio.create_task(reconnect(client))
+
+    while client.isconnected():
+        print("send loop ran!")
+        await asyncio.sleep(1)
+        await client.publish('growbox-data', "i'm alive!!!", qos = 1)
 
 # Listen for hardware changes, if detected, attempt to connect
 # This function connects hardware, this is in case of accidental
@@ -595,14 +656,22 @@ async def controlLightsAndFan():
 
 # Main Async Function, all it does is run the coroutines
 async def main():
-    await asyncio.gather(syncTime(), controlLightsAndFan(), logData(), hardwareListener(), ledStatus())
+    client = MQTTClient(config)
+    await asyncio.gather(
+        syncTime(), 
+        controlLightsAndFan(), 
+        logData(), 
+        hardwareListener(), 
+        ledStatus(),
+        mqttHandler(client))
 
 
-# Setup the main async event loop
+
 # Set up an interrupt (trigger) to count fan rotations for RPM calculation
 p5 = machine.Pin(5, machine.Pin.IN, machine.Pin.PULL_UP)
 p5.irq(trigger=machine.Pin.IRQ_FALLING, handler=fanPulse)
 
+# Setup the main async event loop
 print(rtc.datetime())
 print("starting main event loop...")
 asyncio.run(main())
