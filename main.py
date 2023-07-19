@@ -12,8 +12,14 @@
 # This program (main.py) runs automatically each time the device is
 # powered up.
 
-# ensure that there are no variables from previous runs
-# makes running from a file much safer and less prone to weird issues
+
+
+# NOTE:
+# anywhere line that has "# type: ignore" I'm telling vscode to ignore type checks.
+# This is only done in areas where I am ABSOLUTELY CERTAIN it won't cause problems.
+
+# ensure that there are no variables from previous runs.
+# makes running from a file much safer and less prone to weird issues.
 globals().clear()
 
 # Import Required libraries
@@ -188,20 +194,21 @@ try:
 except:
     seesaw = False
 
+# setup the aht10
+try:
+    aht10 = ahtx0.AHT10(i2c1)
+    aht10.initialize()
+    print("test init worked!")
+except Exception as e:
+    print("test init failed")
+    aht10 = False
 
-# TODO: add support for the  aht10, as of now reciever and sender pins might be swapped so im putting this on hold 
-
-# try:
-#     aht10 = ahtx0.AHT10(i2c1)
-#     aht10.initialize()
-#     print("test init worked!")
-#     while True:
-#         utime.sleep(10)
-# except Exception as e:
-#     print("test init failed")
-#     while True:
-#         utime.sleep(10)
-#     aht10 = False
+# while True:
+#     if aht10:
+#         humid = aht10.relative_humidity
+#         temp = aht10.temperature
+#         print(humid,temp)
+    
 
 # ---Set internal clock using network time or I2C realtime clock---
 # the variable "rtc", refers to the Micropython RTC library, NOT the external battery powered RTC.
@@ -335,6 +342,17 @@ def tryGetINA():      # Read current sensor
     except:
         return -1, -1, -1
 
+# returns (humidity,temp) from an aht10
+def tryGetAht10():
+    global aht10
+
+    if not aht10:
+        return -1, -1
+    
+    try:
+        return aht10.relative_humidity, aht10.temperature # type: ignore
+    except:
+        return -1,-1
 
 def tryGetSeesaw():   # Read soil moisture & temp sensor
     global seesaw
@@ -577,10 +595,12 @@ async def mqttHandler(client):
 async def hardwareListener():
     global seesaw
     global ina
+    global aht10
 
     # These variables are to make sure hardware messages aren't printed multiple times
     seesawDebounce = True
     inaDebounce = True
+    ahtDebounce = True
     while True:
         await asyncio.sleep_ms(500)
         # attempt to connect to the seesaw if its not already connected
@@ -604,6 +624,15 @@ async def hardwareListener():
             except:
                 pass
 
+        if not aht10:
+            try:
+                aht10 = ahtx0.AHT10(i2c1)
+                aht10.initialize()
+                queueLedAction(0)
+            except:
+                pass
+
+
         # check to see if readings are working, if not, set the hardware variable to false
 
         if (tryGetSeesaw() == (-1, -1)) and seesawDebounce:
@@ -616,6 +645,12 @@ async def hardwareListener():
             print("INA disconnected")
             inaDebounce = False
             ina = False
+            queueLedAction(1)
+        
+        if (tryGetAht10() == (-1,-1)) and ahtDebounce:
+            print("aht Disconnected")
+            ahtDebounce = False
+            aht10 = False
             queueLedAction(1)
 
 
