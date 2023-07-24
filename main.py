@@ -479,13 +479,15 @@ async def tryToUploadBackup(client):
     logFolder = os.listdir("/logs")
     for file in logFolder:
         try:
-            with open(file, 'r') as f:
-                data = json.load(f)
-                await client.publish('data', data, qos = 1)
+            with open(f"/logs/{file}", 'r') as f:
+                dataString = f.readlines()
+                await client.publish('data', dataString, qos = 1)
                 f.close()
                 os.remove(f)
+                print(f"backup data sent from \"{file}\"")
         except Exception as e:
             print(f"failed to upload backup file \"{file}\", encountered error: {e}")
+
 
 
 # syncs the time using the internet or rtc, runs every hour
@@ -552,7 +554,7 @@ async def watchDog():
 async def logData(client):
     global accurateTime
     while True:
-        await asyncio.sleep(3600)
+        await asyncio.sleep(5)
         datetime = rtc.datetime()
         if accurateTime:
             allstats = getStats()
@@ -565,12 +567,14 @@ async def logData(client):
         await tryToUploadBackup(client)
 
         try:
-            await client.publish('data', allstats, qos = 1)
+            dataString = json.dumps(allstats)
+            await client.publish('data', dataString, qos = 1)
+            print("data sent!")
             continue
         except Exception as e:
             print(f"data upload failed: {e}")
             logFile = open(logDir, "w")
-            print(f"saving to \"{logFile}\"")
+            print(f"saving to \"{logDir}\"")
             logFile.write(json.dumps(allstats))
             logFile.close()
         
@@ -604,12 +608,9 @@ async def mqttHandler(client):
             print(f"connection failed:{e}")
             await asyncio.sleep(5)
     
+    # start internet-dependent tasks
+    asyncio.create_task(logData(client))
     asyncio.create_task(reconnect(client))
-
-    while client.isconnected():
-        print("send loop ran!")
-        await asyncio.sleep(1)
-        await client.publish('growbox-data', "i'm alive!!!", qos = 1)
 
 # Listen for hardware changes, if detected, attempt to connect.
 # This function connects hardware, this is in case of accidental
@@ -716,8 +717,7 @@ async def main():
     client = MQTTClient(config)
     await asyncio.gather(
         syncTime(), 
-        controlLightsAndFan(), 
-        logData(client), 
+        controlLightsAndFan(),  
         hardwareListener(), 
         ledStatus(),
         mqttHandler(client),
