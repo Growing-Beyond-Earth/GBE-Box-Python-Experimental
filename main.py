@@ -15,7 +15,7 @@
 
 
 # NOTE:
-# anywhere line that has "# type: ignore" I'm telling vscode to ignore type checks.
+# any line that has "# type: ignore" I'm telling vscode to ignore type checks.
 # This is only done in areas where I am ABSOLUTELY CERTAIN it won't cause problems.
 
 # ensure that there are no variables from previous runs.
@@ -38,8 +38,8 @@ import neopixel
 import binascii
 #TODO use another library instead of ntptime that is non blocking and asynchronous
 import ntptime
-
-# TODO add mqtt_as as the network connector. NO NETWORK IN THIS VERSION OF THE CODE - ⚠️⚠️⚠️
+# add watchdog TODO!
+from machine import WDT
 from mqtt_as import MQTTClient,config
 
 print("\n\n\n\n\n\n\n\n\n\n")
@@ -70,7 +70,7 @@ def fileExists(filename):
 
 # Load extra libraries from /lib/, if not able to load, do not run the dependent async function and print a warning
 
-libNotFoundMessage = " not found in /lib/, please make sure all the required libraries are in /lib/ in the pico. You can get a fresh copy of the entire program at GITHUB LINK"
+libNotFoundMessage = " not found in /lib/, please make sure all the required libraries are in /lib/ in the pico. You can get a fresh copy of the entire program at https://github.com/Growing-Beyond-Earth/GBE-Box-Python-Experimental"
 
 if not fileExists("/lib/ina219.py"):
     raise Exception(f"ina219.py{libNotFoundMessage}")
@@ -86,7 +86,7 @@ if not fileExists("/lib/seesaw.py"):
     raise Exception(f"seesaw.py{libNotFoundMessage}")
 
 if not fileExists("/lib/ds3231.py"):
-    raise Exception(f"ds3231{libNotFoundMessage}")
+    raise Exception(f"ds3231.py{libNotFoundMessage}")
 
 if not fileExists("/lib/gbeformat.py"):
     raise Exception(f"gbeformat.py{libNotFoundMessage}")
@@ -134,8 +134,7 @@ wifi_config = True
 
 # checks whether wifi config exists, if not, omit any wifi related code
 if not fileExists("/config/wifi_settings.json"):
-    wifi_config = False
-    print("wifi_settings.json not found!, did you run SETUP.py?\nContinuing without wifi...")
+    raise Exception("wifi_settings.json not found!, did you run SETUP.py?")
 
 # Define the wifi device
 # Get the Unique ID of the Pico. This line makes a conversion from an ascii string to a python string hex number
@@ -367,7 +366,7 @@ def tryGetSeesaw():   # Read soil moisture & temp sensor
         return (-1, -1)
 
 
-# read Co2 Temp and Humidity from the SCD sensor
+# read Co2 Temp and Humidity from the SCD sensor TODO
 def tryGetSCD():
     pass
 
@@ -440,6 +439,10 @@ def getStatsNoRTC():
     ])
 
 
+
+        
+
+
 # Remove old log files, keeping the specified number
 def cleanLogs(keep_number):
     try:
@@ -455,7 +458,7 @@ def cleanLogs(keep_number):
 def lookForUnknownNumber():
     unknownNumber = 1
     while True:
-        if fileExists(f"/logs/UnknownDate({unknownNumber}).csv"):
+        if fileExists(f"/logs/UnknownDate({unknownNumber}).json"):
             unknownNumber += 1
             continue
         return unknownNumber
@@ -468,10 +471,24 @@ def queueLedAction(ledNumber):
     ledBuffer.append(ledNumber)
 
 
-# setup promises that will run in the async event loop
+# ----- setup async functions that will run in the async event loop -----
+
+# attempts to upload files in /logs/, which are saved when
+# uploading failes. does not run in main event loop, only runs in logData()
+async def tryToUploadBackup(client):
+    logFolder = os.listdir("/logs")
+    for file in logFolder:
+        try:
+            with open(file, 'r') as f:
+                data = json.load(f)
+                await client.publish('data', data, qos = 1)
+                f.close()
+                os.remove(f)
+        except Exception as e:
+            print(f"failed to upload backup file \"{file}\", encountered error: {e}")
+
+
 # syncs the time using the internet or rtc, runs every hour
-
-
 async def syncTime():
     while True:
         await asyncio.sleep(3600)
@@ -522,36 +539,41 @@ async def ledStatus():
             queueLedAction(2)
 
 
-
+print(rtc.datetime)
 # Log data to a file, {Year-month-day}.csv
 # will log to UnknownDate(number).csv
+async def watchDog():
+    wdt = WDT(timeout=8388)
+    while True:
+        await asyncio.sleep_ms(1)
+        wdt.feed()
 
-
-async def logData():
+# logs data and sends it to server, saves data if it fails to send.
+async def logData(client):
     global accurateTime
     while True:
+        await asyncio.sleep(3600)
         datetime = rtc.datetime()
         if accurateTime:
             allstats = getStats()
-            logDir = f"/logs/{datetime[0]}-{datetime[1]}-{datetime[2]}.csv"
+            logDir = f"/logs/{datetime[0]}-{datetime[1]}-{datetime[2]} {datetime[4]}:{datetime[5]}.json"
         else:
             allstats = getStatsNoRTC()
-            logDir = f"/logs/UnknownDate({lookForUnknownNumber()}).csv"
+            logDir = f"/logs/UnknownDate({lookForUnknownNumber()}).json"
 
-        # name the file the current date, add the loghead if it doesn't exist
+        # Try to upload the data, if fails, save it and try to upload later
+        await tryToUploadBackup(client)
 
-        if not fileExists(logDir):
+        try:
+            await client.publish('data', allstats, qos = 1)
+            continue
+        except Exception as e:
+            print(f"data upload failed: {e}")
             logFile = open(logDir, "w")
-            logFile.write(gbeformat.hourlog_head())
-        else:
-            logFile = open(logDir, "w")
-
-        # Iter Through the stats and write them to the file.
-        for stat in allstats:
-            logFile.write(f"{stat},")
-        logFile.write("\n")
-        logFile.close()
-        await asyncio.sleep(3600)
+            print(f"saving to \"{logFile}\"")
+            logFile.write(json.dumps(allstats))
+            logFile.close()
+        
 
 # This handles outages, and attempts to reconnect if one is detected
 # NOTE: this is not started in the main function, rather, its started in mqttHandler()
@@ -589,7 +611,7 @@ async def mqttHandler(client):
         await asyncio.sleep(1)
         await client.publish('growbox-data', "i'm alive!!!", qos = 1)
 
-# Listen for hardware changes, if detected, attempt to connect
+# Listen for hardware changes, if detected, attempt to connect.
 # This function connects hardware, this is in case of accidental
 # unplugging or hardware failure. TODO
 async def hardwareListener():
@@ -695,10 +717,11 @@ async def main():
     await asyncio.gather(
         syncTime(), 
         controlLightsAndFan(), 
-        logData(), 
+        logData(client), 
         hardwareListener(), 
         ledStatus(),
-        mqttHandler(client))
+        mqttHandler(client),
+        watchDog(),)
 
 
 
