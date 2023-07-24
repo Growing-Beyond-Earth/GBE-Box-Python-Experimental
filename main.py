@@ -150,7 +150,7 @@ if wifi_config:
     config["queue_len"] = 1
     config['client_id'] = board_id
     #TODO make a central server that this will connect to, for now, connect to a raspberry pi on the local network
-    config['server'] = "broker.hivemq.com"#'192.168.0.100'
+    config['server'] = "3.84.36.243"
     config['user'] = ""
     config['password'] = ""
     config['keepalive'] = 60
@@ -163,7 +163,6 @@ if wifi_config:
     config['max_repubs'] = 4
     config['will'] = None
     config['port'] = 1883
-
 
 
 
@@ -592,7 +591,7 @@ async def reconnect(client):
         await asyncio.sleep(3)
         try:
             await client.connect()
-            print("Conneted!")
+            print("Connected!")
         except Exception as e:
             print(f"failed to reconnect:{e}")
             await asyncio.sleep(5)
@@ -603,12 +602,15 @@ async def mqttHandler(client):
     while not client.isconnected():
         try:
             await client.connect()
-            print("Conneted!")
+            print("Connected!")
         except Exception as e:
             print(f"connection failed:{e}")
             await asyncio.sleep(5)
     
     # start internet-dependent tasks
+    while True:
+        await asyncio.sleep(5)
+        await client.publish('data', "hello world", qos = 1)
     asyncio.create_task(logData(client))
     asyncio.create_task(reconnect(client))
 
@@ -715,6 +717,7 @@ async def controlLightsAndFan():
 # Main Async Function, all it does is run the coroutines
 async def main():
     client = MQTTClient(config)
+
     await asyncio.gather(
         syncTime(), 
         controlLightsAndFan(),  
