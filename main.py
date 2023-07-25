@@ -91,9 +91,19 @@ if not fileExists("/lib/ds3231.py"):
 if not fileExists("/lib/gbeformat.py"):
     raise Exception(f"gbeformat.py{libNotFoundMessage}")
 
+# Encryption to help prevent bad actors from sending junk data
+# Prevents impersonating other grow boxes.
+def encrypt_message(e, n, msg):
+    cipher_text = [pow(ord(char), e, n) for char in msg]
+    return cipher_text
+
+# example usage:
+# public_key = (e, n)  # replace e and n with the actual values
+# message = 'Hello, World!'
+# encrypted_message = encrypt_message(*public_key, message)
+
+
 # Load Load lights, fan, time zone configuration from JSON file
-
-
 # Check to see if gbe_settings exists
 if not fileExists("/config/gbe_settings.json"):
     raise Exception("gbe_settings.json not found!, did you run SETUP.py?")
@@ -380,17 +390,19 @@ def getStats():
     vol, mam, mwa = tryGetINA()  # Read current sensor
     # Read soil moisture & temp sensor
     soilMoisture, soilTermperature = tryGetSeesaw()
+    ambientMoisture, ambientTemperature = tryGetAht10()
     fanCounterPrevMs = fanCounterCurrentMs
     fanCounterCurrentMs = utime.ticks_ms()
     return ([
+        board_id,
         # gets the time in year-month-day format
         f"\"{datetime[0]}-{datetime[1]}-{datetime[2]}\"",
         f"\"{datetime[4]}:{datetime[5]}\"",
         # Duty of red green blue, and white LEDs (respectivly R G B, and W)
-        round(r.duty_u16()/256),
-        round(g.duty_u16()/256),
-        round(b.duty_u16()/256),
-        round(w.duty_u16()/256),
+        r.duty_u16()//256,
+        g.duty_u16()//256,
+        b.duty_u16()//256,
+        w.duty_u16()//256,
         # voltage, miliamps, and wattage
         round(vol, 2),
         round(mam),
@@ -401,7 +413,9 @@ def getStats():
         fanSpinCounter/(fanCounterCurrentMs-fanCounterPrevMs)*30000,
         # readings from temp and moisture sensor
         soilTermperature,
-        soilMoisture
+        soilMoisture,
+        ambientTemperature,
+        ambientMoisture,
     ])
 
 
@@ -413,9 +427,11 @@ def getStatsNoRTC():
     vol, mam, mwa = tryGetINA()  # Read current sensor
     # Read soil moisture & temp sensor
     soilMoisture, soilTermperature = tryGetSeesaw()
+    ambientMoisture, ambientTemperature = tryGetAht10()
     fanCounterPrevMs = fanCounterCurrentMs
     fanCounterCurrentMs = utime.ticks_ms()
     return ([
+        board_id,
         # this function is run when time is not known, therefore they have been replaced by "?"
         "\"?\"",
         "\"?\"",
@@ -434,12 +450,10 @@ def getStatsNoRTC():
         fanSpinCounter/(fanCounterCurrentMs-fanCounterPrevMs)*30000,
         # readings from temp and moisture sensor
         soilTermperature,
-        soilMoisture
+        soilMoisture,
+        ambientTemperature,
+        ambientMoisture,
     ])
-
-
-
-        
 
 
 # Remove old log files, keeping the specified number
@@ -479,10 +493,10 @@ async def tryToUploadBackup(client):
     for file in logFolder:
         try:
             with open(f"/logs/{file}", 'r') as f:
-                dataString = f.readlines()
-                await client.publish('data', dataString, qos = 1)
+                data = f.read().encode('ascii')
+                await client.publish('data', data, qos = 1)
                 f.close()
-                os.remove(f)
+                os.remove(f"/logs/{file}")
                 print(f"backup data sent from \"{file}\"")
         except Exception as e:
             print(f"failed to upload backup file \"{file}\", encountered error: {e}")
@@ -566,7 +580,8 @@ async def logData(client):
         await tryToUploadBackup(client)
 
         try:
-            dataString = json.dumps(allstats)
+            dataString = json.dumps(allstats).encode('ascii')
+            print(dataString)
             await client.publish('data', dataString, qos = 1)
             print("data sent!")
             continue
@@ -608,9 +623,9 @@ async def mqttHandler(client):
             await asyncio.sleep(5)
     
     # start internet-dependent tasks
-    while True:
-        await asyncio.sleep(5)
-        await client.publish('data', "hello world", qos = 1)
+    # while True:
+    #     await asyncio.sleep(5)
+    #     await client.publish('data', "hello world", qos = 1)
     asyncio.create_task(logData(client))
     asyncio.create_task(reconnect(client))
 
