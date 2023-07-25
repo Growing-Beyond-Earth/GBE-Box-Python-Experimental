@@ -38,7 +38,6 @@ import neopixel
 import binascii
 #TODO use another library instead of ntptime that is non blocking and asynchronous
 import ntptime
-# add watchdog TODO!
 from machine import WDT
 from mqtt_as import MQTTClient,config
 
@@ -279,7 +278,7 @@ else:
     accurateTime = False
     print("Internal clock failed to set.\nFalling back to possibly unsynced clock...")
 
-# Setup CSV logging
+# Setup json logging
 
 if not dirExists("/logs"):
     print("logs folder does not exist\nCreating logs folder...")
@@ -467,7 +466,7 @@ def cleanLogs(keep_number):
         print("Error cleaning up log files:", e)
 
 
-# Looks for open Unknown CSv date eg: UnknownDate(1).csv
+# Looks for open Unknown json date eg: UnknownDate(1).json
 def lookForUnknownNumber():
     unknownNumber = 1
     while True:
@@ -555,8 +554,7 @@ async def ledStatus():
 
 
 print(rtc.datetime)
-# Log data to a file, {Year-month-day}.csv
-# will log to UnknownDate(number).csv
+
 async def watchDog():
     wdt = WDT(timeout=8388)
     while True:
