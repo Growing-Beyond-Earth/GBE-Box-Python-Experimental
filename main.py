@@ -38,7 +38,6 @@ import neopixel
 import binascii
 #TODO use another library instead of ntptime that is non blocking and asynchronous
 import ntptime
-# add watchdog TODO!
 from machine import WDT
 from mqtt_as import MQTTClient,config
 

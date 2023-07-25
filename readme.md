@@ -42,6 +42,15 @@ The program is designed to be resilient against hardware disconnections or failu
 
 Contributions are always welcome! If you want to contribute, please fork the repository and use a feature branch. Pull requests are warmly welcome.
 
+## Join Our Community 🌍
+Our community plays a pivotal role in the development and refinement of this program. We encourage everyone to join us, share their experiences, ask questions, and provide feedback.
+
+The best place to connect with us is on our Discord server. Here, you can interact with both the developers and other users. It's a great place to learn more about the program, stay updated with the latest changes, and help us create a better tool for everyone.
+
+Here's the link to our Discord server: https://discord.gg/k8xd4xTD87
+
+We look forward to seeing you there!
+
 ## Links 🔗
 
 - Project repository: https://github.com/Growing-Beyond-Earth/GBE-Box-Python-Experimental
