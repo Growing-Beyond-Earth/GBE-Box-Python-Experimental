@@ -92,9 +92,19 @@ if not fileExists("/lib/gbeformat.py"):
 
 # Encryption to help prevent bad actors from sending junk data
 # Prevents impersonating other grow boxes.
-def encrypt_message(e, n, msg):
+
+if not fileExists("/pub.key"):
+    raise Exception("Public Key not found!, please get a fresh copy of the program at https://github.com/Growing-Beyond-Earth/GBE-Box-Python-Experimental")
+
+with open("/pub.key", "r") as f:
+    publicKey = json.load(f)
+
+def encrypt_message(msg):
+    e, n = publicKey[0], publicKey[1]
     cipher_text = [pow(ord(char), e, n) for char in msg]
     return cipher_text
+
+
 
 # example usage:
 # public_key = (e, n)  # replace e and n with the actual values
@@ -148,7 +158,8 @@ if not fileExists("/config/wifi_settings.json"):
 # Define the wifi device
 # Get the Unique ID of the Pico. This line makes a conversion from an ascii string to a python string hex number
 board_id = binascii.hexlify(machine.unique_id()).decode()
-
+# encrypted board id for sharing
+encryptedBoardId = encrypt_message(board_id)
 # Load wifi settings and connect to wifi if they are set up.
 if wifi_config:
     with open('/config/wifi_settings.json') as wifi_file:
