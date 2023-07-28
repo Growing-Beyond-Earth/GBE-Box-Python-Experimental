@@ -4,6 +4,12 @@
 
 All of the code here is experimental and mostly untested. Expect instability and errors.
 
+## Todo 📜
+- Finish the backend
+- Add support for more devices
+- Fix Red led pulsing on startup (due to "disconnected" devices that were never connected in the first place)
+- Finish cryptography, the pico should not be sending it's raw board ID, rather, sending an encrypted version using the public key in key.json, and decrypted on the server using the private key. The encrypt function is already there.
+
 # Growing Beyond Earth Control Box 🌱📦
 
 This Micropython project is designed to control the LED lights, fans, and other accessories in a Growing Beyond Earth (GBE) growth chamber. The device is based on a Raspberry Pi Pico W microcontroller. It provides control for a variety of sensors and devices, such as environmental sensors.
