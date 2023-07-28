@@ -1,13 +1,8 @@
 # GROWING BEYOND EARTH CONTROL BOX
 # RASPBERRY PI PICO / MICROPYTHON
 
-# FAIRCHILD TROPICAL BOTANIC GARDEN, SEPTEMBER 22, 2022
+# FAIRCHILD TROPICAL BOTANIC GARDEN, July 28, 2023
 
-# The Growing Beyond Earth (GBE) control box is a device that controls
-# the LED lights and fan in a GBE growth chamber. It can also control
-# accessories including a 12v water pump and environmental sensors.
-# The device is based on a Raspberry Pi Pico microcontroller running
-# Micropython.
 
 # This program (main.py) runs automatically each time the device is
 # powered up.
@@ -46,7 +41,7 @@ print('  ____ ____  _____')
 print(' / ___| __ )| ____|   GROWING BEYOND EARTH(R)')
 print('| |  _|  _ \\|  _|     FAIRCHILD TROPICAL BOTANIC GARDEN')
 print('| |_| | |_) | |___    Raspberry Pi Pico W / Micropython')
-print(' \\____|____/|_____|   Software release date: ?\n')
+print(' \\____|____/|_____|   Software release date: 7-28-2023\n')
 print('N E T W O R K   A N D   H A R D W A R E    S E T U P\n\n')
 
 
@@ -93,10 +88,11 @@ if not fileExists("/lib/gbeformat.py"):
 # Encryption to help prevent bad actors from sending junk data
 # Prevents impersonating other grow boxes.
 
-if not fileExists("/pub.key"):
+if not fileExists("/key.json"):
     raise Exception("Public Key not found!, please get a fresh copy of the program at https://github.com/Growing-Beyond-Earth/GBE-Box-Python-Experimental")
 
-with open("/pub.key", "r") as f:
+# reads key.json, will contain keys, server code has private key
+with open("/key.json", "r") as f:
     publicKey = json.load(f)
 
 def encrypt_message(msg):
@@ -385,7 +381,7 @@ def tryGetSeesaw():   # Read soil moisture & temp sensor
         return (-1, -1)
 
 
-# read Co2 Temp and Humidity from the SCD sensor TODO
+# read Co2 Temp and Humidity from the SCD40 sensor TODO
 def tryGetSCD():
     pass
 
@@ -403,6 +399,7 @@ def getStats():
     ambientMoisture, ambientTemperature = tryGetAht10()
     fanCounterPrevMs = fanCounterCurrentMs
     fanCounterCurrentMs = utime.ticks_ms()
+    # NOTE: I removed this hashmap since hashmaps are fairly slow on the pico, use index number instead
     return ([
         board_id,
         # gets the time in year-month-day format
@@ -424,6 +421,7 @@ def getStats():
         # readings from temp and moisture sensor
         soilTermperature,
         soilMoisture,
+        # readings from aht10
         ambientTemperature,
         ambientMoisture,
     ])
@@ -489,7 +487,12 @@ def lookForUnknownNumber():
 
 ledBuffer = []
 
-
+# performs any led actions in ledBuffer
+# 0 is a green pulse
+# 1 is a red pulse
+# 2 is a blue pulse
+# add more led actions TODO
+# see ledStatus()
 def queueLedAction(ledNumber):
     ledBuffer.append(ledNumber)
 
@@ -528,17 +531,11 @@ async def syncTime():
             print(
                 "WARNING: Failed to sync time online, Internal Clock and RTC may slowly drift away from accurate time")
 
-# performs any led actions in ledBuffer
-# 0 is a green pulse
-# 1 is a red pulse
-# 2 is a blue pulse
-# add more led actions TODO
 
-
+# reads from ledbuffer, see queueLedAction for adding tasks to ledbuffer
 async def ledStatus():
     global ledBuffer
     global np
-    global wifi_config
 
     while True:
         await asyncio.sleep_ms(1)
@@ -560,16 +557,17 @@ async def ledStatus():
             np[0] = ledColor
             np.write()
             await asyncio.sleep_ms(4)
-        if not wifi_config:
-            queueLedAction(2)
 
 
 print(rtc.datetime)
 
+# Runs in the main event loop, If something takes more than 8.388 seconds, then restart the board
+# If you notice the board restarting, maybe remove thsi from the main event loop.
+# I would set it higher, but unfortunately 8388 is the max value.
 async def watchDog():
     wdt = WDT(timeout=8388)
     while True:
-        await asyncio.sleep_ms(1)
+        await asyncio.sleep_ms(1) # feed the watchdog as often as possible
         wdt.feed()
 
 # logs data and sends it to server, saves data if it fails to send.
@@ -578,16 +576,19 @@ async def logData(client):
     while True:
         await asyncio.sleep(5)
         datetime = rtc.datetime()
-        if accurateTime:
+
+        # find the filename, will be saved as datetime, or unknown
+        if accurateTime: # if the time is accurate, use the date, else, use Unknown(NUM).json
             allstats = getStats()
             logDir = f"/logs/{datetime[0]}-{datetime[1]}-{datetime[2]} {datetime[4]}:{datetime[5]}.json"
         else:
             allstats = getStatsNoRTC()
             logDir = f"/logs/UnknownDate({lookForUnknownNumber()}).json"
 
-        # Try to upload the data, if fails, save it and try to upload later
+        # Try to upload backup data saved from previous runs
         await tryToUploadBackup(client)
-
+        
+        # will try to upload most recent logs, saves to the above filename in /logs/
         try:
             dataString = json.dumps(allstats).encode('ascii')
             print(dataString)
@@ -602,7 +603,7 @@ async def logData(client):
             logFile.close()
         
 
-# This handles outages, and attempts to reconnect if one is detected
+# This handles wifi outages, and attempts to reconnect if one is detected
 # NOTE: this is not started in the main function, rather, its started in mqttHandler()
 async def reconnect(client):
     while True:
@@ -623,6 +624,7 @@ async def reconnect(client):
 # Connect to the internet
 async def mqttHandler(client):
     print("attempting to connect...")
+    # try to connect, to wifi, wait 5 secs and retry if failed.
     while not client.isconnected():
         try:
             await client.connect()
@@ -631,22 +633,20 @@ async def mqttHandler(client):
             print(f"connection failed:{e}")
             await asyncio.sleep(5)
     
-    # start internet-dependent tasks
-    # while True:
-    #     await asyncio.sleep(5)
-    #     await client.publish('data', "hello world", qos = 1)
+    # start internet-dependent tasks in the main event loop.
     asyncio.create_task(logData(client))
     asyncio.create_task(reconnect(client))
 
 # Listen for hardware changes, if detected, attempt to connect.
 # This function connects hardware, this is in case of accidental
-# unplugging or hardware failure. TODO
+# unplugging or hardware failure. TODO: add more support, fix "disconnected" message on startup
 async def hardwareListener():
     global seesaw
     global ina
     global aht10
 
     # These variables are to make sure hardware messages aren't printed multiple times
+    # NOTE: i THINK setting these to false will fix the "disconnected" issue but I'm not sure, I don't have time.
     seesawDebounce = True
     inaDebounce = True
     ahtDebounce = True
@@ -704,7 +704,7 @@ async def hardwareListener():
 
 
 # Changes the lights and fans based off the time and user configurations
-# ask a gradient option for tapering of brightness of light TODO
+# TODO: add tapering, eg: light intensity that follows a sin wave.
 
 
 async def controlLightsAndFan():
@@ -742,6 +742,8 @@ async def controlLightsAndFan():
 async def main():
     client = MQTTClient(config)
 
+    # This should never return, if it does, restart the board
+
     await asyncio.gather(
         syncTime(), 
         controlLightsAndFan(),  
@@ -749,6 +751,8 @@ async def main():
         ledStatus(),
         mqttHandler(client),
         watchDog(),)
+
+    machine.reset()
 
 
 
